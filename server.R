@@ -198,6 +198,44 @@ ci_two_stage_exact <- function(n1, n2, a1,
   return(c(lower = p_lower, upper = p_upper))
 }
 
+# p-value based on estimator-ordering per Jung (lecture ch.3)
+# n1, n2, a1 : design
+# m_obs, s_obs : observed stopping stage and cumulative successes
+# p0 : null value (H0: p = p0)
+# estimator : "UMVUE" or "MLE"
+p_value_two_stage <- function(n1, n2, a1, m_obs, s_obs, p0,
+                              estimator = c("UMVUE", "MLE")) {
+  estimator <- match.arg(estimator)
+  # get table with PMF column for p0
+  # umvue_mle_table_with_p normalizes f(...) column so it sums to 1
+  rows <- umvue_mle_table_with_p(n1 = n1, n2 = n2, a1 = a1,
+                                 a = NULL,
+                                 p_vec = p0)
+  # name of pmf column produced by umvue_mle_table_with_p
+  pmf_col <- paste0("f_p", gsub("\\.", "", as.character(p0)))
+  if (!pmf_col %in% names(rows)) stop("PMF column not found in rows.")
+  
+  # find observed row index
+  idx_obs <- which(rows$m == m_obs & rows$s == s_obs)
+  if (length(idx_obs) != 1) stop("Observed (m,s) not found in table rows.")
+  
+  # pick estimator values and the f vector
+  est_vals <- if (estimator == "UMVUE") rows$UMVUE else rows$MLE
+  fvec <- rows[[pmf_col]]
+  # numerical safety: ensure fvec sums to 1
+  if (sum(fvec) <= 0) stop("Computed PMF sums to 0 at p0.")
+  fvec <- fvec / sum(fvec)
+  
+  # observed estimator
+  obs_est <- est_vals[idx_obs]
+  
+  # p-value (upper-tail): sum f(i,j|p0) for estimator >= obs_est
+  # include equality (>=) per definition in slides
+  pval <- sum(fvec[est_vals >= (obs_est - .Machine$double.eps)])
+  
+  return(as.numeric(pval))
+}
+
 
 
 # --- Combine all
@@ -207,7 +245,10 @@ two_stage_ci_table <- function(n1, n2, a1, a, alpha = 0.05, p_values = c(0.1,0.2
   out$MLE_upper <- NA_real_
   out$UMVUE_lower <- NA_real_
   out$UMVUE_upper <- NA_real_
+  out$MLE_pvalue <- NA_real_
+  out$UMVUE_pvalue <- NA_real_
   
+
   for (i in seq_len(nrow(out))) {
     ci_mle <- ci_two_stage_exact(n1, n2, a1, out$m[i], out$s[i], "MLE", alpha)
     ci_umvue <- ci_two_stage_exact(n1, n2, a1, out$m[i], out$s[i], "UMVUE", alpha)
@@ -216,6 +257,22 @@ two_stage_ci_table <- function(n1, n2, a1, a, alpha = 0.05, p_values = c(0.1,0.2
     out$UMVUE_lower[i] <- ci_umvue[1]
     out$UMVUE_upper[i] <- ci_umvue[2]
   }
+  for (i in seq_len(nrow(out))) {
+    ci_mle <- ci_two_stage_exact(n1, n2, a1, out$m[i], out$s[i], "MLE", alpha)
+    ci_umvue <- ci_two_stage_exact(n1, n2, a1, out$m[i], out$s[i], "UMVUE", alpha)
+    out$MLE_lower[i] <- ci_mle[1]
+    out$MLE_upper[i] <- ci_mle[2]
+    out$UMVUE_lower[i] <- ci_umvue[1]
+    out$UMVUE_upper[i] <- ci_umvue[2]
+    
+    # NEW: exact p-values using Jung-style ordering (use p0 from input)
+    # Here you must decide which p0 to use for the test; typically that's an input value.
+    # Example: assume you add 'p0' as an input or reuse the first element of p_values.
+    # I'll use 'p0' variable below — make sure it exists in your scope.
+    out$MLE_pvalue[i] <- p_value_two_stage(n1, n2, a1, out$m[i], out$s[i], p0, "MLE")
+    out$UMVUE_pvalue[i] <- p_value_two_stage(n1, n2, a1, out$m[i], out$s[i], p0, "UMVUE")
+  }
+  
   
   out
 }
@@ -256,41 +313,72 @@ server <- function(input, output, session) {
     n1 <- input$n1
     n2 <- input$n2
     a1 <- input$a1
-    a <- input$a
+    a  <- input$a
+    p0<-input$p0
     alpha <- input$alpha
     p_values <- as.numeric(strsplit(input$pvals, ",")[[1]])
     
-    tbl <- two_stage_ci_table(n1, n2, a1, a, alpha, p_values)
-    tbl
+    two_stage_ci_table(n1, n2, a1, a, alpha, p_values)
   })
   
-  # ---- Render table ----
-  output$results_table <- renderDT({
+  # ----------------------------------------------------
+  # ESTIMATE TABLE: m, s, UMVUE, MLE, and PMF columns
+  # ----------------------------------------------------
+  output$estimates_table <- renderDT({
     req(table_data())
-    datatable(table_data(), options = list(pageLength = 15, scrollX = TRUE))
+    df <- table_data()
+    pmf_cols <- grep("^f_", names(df), value = TRUE)
+    est_df <- df[, c("m", "s", "UMVUE", "MLE", pmf_cols)]
+    
+    datatable(est_df, options = list(pageLength = 20, scrollX = TRUE))
   })
   
-  # ---- Render plot ----
+  # ----------------------------------------------------
+  # CI TABLE: m, s, UMVUE CIs, MLE CIs, and PMF columns
+  # ----------------------------------------------------
+  output$ci_table <- renderDT({
+    req(table_data())
+    df <- table_data()
+    pmf_cols <- grep("^f_", names(df), value = TRUE)
+    
+    ci_df <- df[, c("m", "s",
+                    "UMVUE_lower", "UMVUE_upper",
+                    "MLE_lower", "MLE_upper",
+                    pmf_cols)]
+    
+    datatable(ci_df, options = list(pageLength = 20, scrollX = TRUE))
+  })
+  
+  output$pvalue_table <- renderDT({
+    req(table_data())
+    df <- table_data()
+    pmf_cols <- grep("^f_", names(df), value = TRUE)
+    
+    base_cols <- c("m", "s", "UMVUE", "MLE", "UMVUE_pvalue", "MLE_pvalue")
+    if (isTRUE(input$show_pmf)) {
+      pv_df <- df[, c(base_cols, pmf_cols)]
+    } else {
+      pv_df <- df[, base_cols]
+    }
+    datatable(pv_df, options = list(pageLength = 20, scrollX = TRUE))
+  })
+  
+  
+  # ---- PMF plots ----
   output$results_plot1 <- renderPlot({
     req(table_data())
     plot_pmf1(table_data())
   })
   
-  # ---- Render plot ----
-  output$results_plot2<- renderPlot({
+  output$results_plot2 <- renderPlot({
     req(table_data())
     plot_pmf2(table_data())
   })
   
-  # ---- Download handler ----
+  # ---- Download ----
   output$downloadData <- downloadHandler(
-    filename = function() {
-      paste0("two_stage_results_", Sys.Date(), ".csv")
-    },
-    content = function(file) {
-      write.csv(table_data(), file, row.names = FALSE)
-    }
+    filename = function() paste0("two_stage_results_", Sys.Date(), ".csv"),
+    content = function(file) write.csv(table_data(), file, row.names = FALSE)
   )
 }
-
 

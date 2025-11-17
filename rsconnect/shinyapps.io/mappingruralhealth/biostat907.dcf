@@ -5,8 +5,8 @@ account: mappingruralhealth
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 16077875
-bundleId: 11184542
-url: https://mappingruralhealth.shinyapps.io/biostat907/
+bundleId: 11187479
+url: https://biostat907.shinyapps.io/biostat907/
 version: 1
 asMultiple: FALSE
 asStatic: FALSE
