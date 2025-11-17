@@ -3,7 +3,9 @@ library(DT)
 # UI
 # ========================================================
 ui <- fluidPage(
-  titlePanel("Two-Stage UMVUE & MLE Explorer (Updated)"),
+  titlePanel("MLE and UMVUE Inference on
+the Binomial Probability in Single-Arm Two-stage
+Clinical Trials"),
   
   sidebarLayout(
     sidebarPanel(
@@ -13,7 +15,7 @@ ui <- fluidPage(
       numericInput("a",  "Final cutoff (a):", 12, min=0),
       numericInput("alpha","Alpha (1 - CI level):", 0.05, min=0.001, max=0.5),
       textInput("pvals", "Probability mass for true p at each observation:", "0.1,0.2,0.3,0.4,0.5"),
-      numericInput("p0", "Null p0 for p-value test:", 0.2, min=0, max=1, step=0.01),
+      numericInput("p0", "Maximum unacceptable probability of response", 0.4, min=0, max=1, step=0.01),
       
       checkboxInput("show_pmf", "Show PMF Columns", value=TRUE),
       
@@ -36,4 +38,3 @@ ui <- fluidPage(
   )
 )
 
-shinyApp(ui, server) 
